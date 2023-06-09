@@ -49,9 +49,12 @@ class ViewController: UIViewController {
         return button
     }()
 
+    var annotationsArray = [MKPointAnnotation]()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        mapView.delegate = self
         setConstraints()
         
         addButton.addTarget(self, action: #selector(didTapAdd), for: .touchUpInside)
@@ -61,16 +64,90 @@ class ViewController: UIViewController {
 
     @objc private func didTapAdd() {
         alertAdd(title: "Add", placdeHolder: "Address") { text in
-            print(text)
+            self.setupPlaceMark(addressPlace: text)
         }
     }
     
     @objc private func didTapRoute() {
+        for i in 0...annotationsArray.count - 2 {
+            createDirectionRequest(startCoordinate: annotationsArray[i].coordinate, destinationCoordinate: annotationsArray[i + 1].coordinate)
+        }
         
+        mapView.showAnnotations(annotationsArray, animated: true)
     }
     
     @objc private func didTapReset() {
+        mapView.removeOverlays(mapView.overlays)
+        mapView.removeAnnotations(mapView.annotations)
+        annotationsArray = [MKPointAnnotation]()
+        routeButton.isHidden = true
+        resetButton.isHidden = true
+    }
+    
+    private func setupPlaceMark(addressPlace: String) {
+        let geocoder = CLGeocoder()
+        geocoder.geocodeAddressString(addressPlace) { [self] placeMarks, error in
+            if let error = error {
+                print(error)
+                alertError(title: "Error", message: "Something went wrong. Please try again.")
+                return
+            }
+            
+            guard let placeMarks = placeMarks else { return }
+            let placeMark = placeMarks.first
+            
+            let annotation = MKPointAnnotation()
+            annotation.title = addressPlace
+            guard let placeMarkLocation = placeMark?.location else { return }
+            annotation.coordinate = placeMarkLocation.coordinate
+            
+            annotationsArray.append(annotation)
+            if annotationsArray.count > 2 {
+                routeButton.isHidden = false
+                resetButton.isHidden = false
+            }
+            
+            mapView.showAnnotations(annotationsArray, animated: true)
+        }
+    }
+    
+    private func createDirectionRequest(startCoordinate: CLLocationCoordinate2D, destinationCoordinate:  CLLocationCoordinate2D) {
+        let startCLocation = MKPlacemark(coordinate: startCoordinate)
+        let destinationLocation = MKPlacemark(coordinate: destinationCoordinate)
         
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: startCLocation)
+        request.destination = MKMapItem(placemark: destinationLocation)
+        request.transportType = .walking
+        request.requestsAlternateRoutes = true
+        
+        let direction = MKDirections(request: request)
+        direction.calculate { response, error in
+            if let error = error {
+                print(error)
+                return
+            }
+            
+            guard let response = response else {
+                self.alertError(title: "Error", message: "Directions unavailable, please try again later.")
+                return
+            }
+            
+            var minRoute = response.routes[0]
+            for route in response.routes {
+                minRoute = (route.distance < minRoute.distance) ? route : minRoute
+            }
+            
+            self.mapView.addOverlay(minRoute.polyline)
+        }
+    }
+}
+
+extension ViewController: MKMapViewDelegate {
+    func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+        let renderer = MKPolylineRenderer(overlay: overlay as! MKPolyline)
+        renderer.strokeColor = .green
+        return renderer
     }
 }
 
